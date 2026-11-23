@@ -1,11 +1,95 @@
-<!doctype html>
-<html lang="en">
+<!DOCTYPE html>
+<html lang="zh-CN">
 <head>
-<meta charset="utf-8">
-<title>Cloudzyro demo — latency test page</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cloudzyro 演示站 · 内地访问测速</title>
+<style>
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; max-width: 640px; margin: 0 auto; padding: 24px 16px; color: #222; line-height: 1.6; }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  .sub { color: #666; font-size: 14px; margin-bottom: 20px; }
+  button { font-size: 16px; padding: 10px 22px; border: none; border-radius: 8px; background: #0a6c4e; color: #fff; cursor: pointer; }
+  button:disabled { background: #999; cursor: default; }
+  #status { margin: 16px 0; color: #555; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+  td, th { border: 1px solid #ddd; padding: 8px 10px; text-align: left; font-size: 15px; }
+  th { background: #f5f5f5; width: 34%; }
+  .big { font-size: 18px; font-weight: bold; }
+  #summary { margin: 16px 0; padding: 12px; background: #f0f7f3; border-radius: 8px; font-size: 16px; }
+  .note { color: #888; font-size: 13px; margin-top: 20px; }
+</style>
 </head>
 <body>
-<h1>Cloudzyro demo — latency test page</h1>
-<p>Deployed: 2026-11-23 14:33 CST (Asia/Shanghai)</p>
+<h1>Cloudzyro 演示站 · 内地访问测速</h1>
+<p class="sub">打开页面会自动测一轮：延迟、下载速度、页面加载时间。测完把结果截图发回来就行。</p>
+<button id="retest" disabled>测试中…</button>
+<p id="status">正在测试，请稍候…</p>
+<table>
+  <tr><th>延迟（平均）</th><td id="r-lat-avg">—</td></tr>
+  <tr><th>延迟（最小 / 最大）</th><td id="r-lat-mm">—</td></tr>
+  <tr><th>下载速度</th><td id="r-dl" class="big">—</td></tr>
+  <tr><th>页面加载时间</th><td id="r-load">—</td></tr>
+  <tr><th>测试时间</th><td id="r-time">—</td></tr>
+</table>
+<div id="summary">测试中…</div>
+<p class="note">说明：延迟是 10 次小请求的往返平均值；下载速度是拉取一个 5MB 测试文件的实测速度；结果受你本地网络、运营商和时段影响，多测几次取平均更准。本站部署在 Cloudzyro 免费 Launch 套餐，域名经 Cloudflare 解析。</p>
+<p class="note">Deployed: 2026-11-23 · Cloudzyro demo — latency test page</p>
+<script>
+async function testLatency(rounds) {
+  var times = [];
+  for (var i = 0; i < rounds; i++) {
+    var t0 = performance.now();
+    await fetch('ping.txt?t=' + Date.now() + '-' + i, { cache: 'no-store' });
+    times.push(performance.now() - t0);
+  }
+  var avg = times.reduce(function (a, b) { return a + b; }, 0) / times.length;
+  return { avg: avg, min: Math.min.apply(null, times), max: Math.max.apply(null, times) };
+}
+async function testDownload() {
+  var url = 'speedtest-5mb.bin?t=' + Date.now();
+  var t0 = performance.now();
+  var res = await fetch(url, { cache: 'no-store' });
+  var reader = res.body.getReader();
+  var received = 0;
+  for (;;) {
+    var chunk = await reader.read();
+    if (chunk.done) break;
+    received += chunk.value.length;
+  }
+  var secs = (performance.now() - t0) / 1000;
+  var mbs = received / 1024 / 1024 / secs;
+  return { mbs: mbs, mbps: mbs * 8, bytes: received, secs: secs };
+}
+async function runTests() {
+  var btn = document.getElementById('retest');
+  var status = document.getElementById('status');
+  btn.disabled = true;
+  btn.textContent = '测试中…';
+  try {
+    status.textContent = '正在测延迟（10 次小请求）…';
+    var lat = await testLatency(10);
+    document.getElementById('r-lat-avg').textContent = lat.avg.toFixed(0) + ' ms';
+    document.getElementById('r-lat-mm').textContent = lat.min.toFixed(0) + ' ms / ' + lat.max.toFixed(0) + ' ms';
+    status.textContent = '正在测下载速度（拉取 5MB 文件）…';
+    var dl = await testDownload();
+    document.getElementById('r-dl').textContent = dl.mbs.toFixed(2) + ' MB/s（' + dl.mbps.toFixed(1) + ' Mbps）';
+    var nav = performance.getEntriesByType('navigation')[0];
+    var loadMs = nav ? (nav.loadEventEnd - nav.startTime) : 0;
+    document.getElementById('r-load').textContent = loadMs > 0 ? (loadMs / 1000).toFixed(2) + ' 秒' : '—';
+    var now = new Date();
+    document.getElementById('r-time').textContent = now.toLocaleString('zh-CN');
+    document.getElementById('summary').textContent =
+      '结果：延迟 ' + lat.avg.toFixed(0) + 'ms · 下载 ' + dl.mbs.toFixed(2) + ' MB/s（' + dl.mbps.toFixed(1) + ' Mbps）';
+    status.textContent = '测试完成。';
+  } catch (e) {
+    status.textContent = '测试失败：' + e.message + '，请点重新测试再试一次。';
+    document.getElementById('summary').textContent = '测试失败，请重试。';
+  }
+  btn.disabled = false;
+  btn.textContent = '重新测试';
+}
+document.getElementById('retest').addEventListener('click', runTests);
+window.addEventListener('load', function () { setTimeout(runTests, 300); });
+</script>
 </body>
 </html>
